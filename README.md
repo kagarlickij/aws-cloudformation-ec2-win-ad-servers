@@ -75,9 +75,9 @@ Windows hostname is limited to [15 characters](https://support.microsoft.com/en-
 ### 4. First parse of UserData log by Amazon SSM Agent is not correct
 Amazon SSM Agent has correct mask for UserData execution log: `"TimestampFormat": "yyyy/MM/dd HH:mm:ss'Z':"`
 
-However first bunch of events will not be displayed correctlly in CloudWatch Logs GUI (further events will be displayed correctly)
+However first bunch of events will not be displayed correctly in CloudWatch Logs GUI (further events will be displayed correctly)
 
-### 5. AWS SSM isn't stable enought for Windows
+### 5. AWS SSM isn't stable enough for Windows
 It should be replaced with Elastic Filebeat or something similar.
 
 AWS SSM and CloudWatch are used for demo purposes only.
