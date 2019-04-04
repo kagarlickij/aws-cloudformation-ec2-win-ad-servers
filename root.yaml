@@ -1,0 +1,240 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Metadata:
+  Author: Dmitriy Kagarlickij
+
+  # cfn-lint:
+  #   config:
+  #     ignore_checks:
+
+Parameters:
+  Environment:
+    Type: String
+  NestedTemplateUrl:
+    Type: String
+  BucketName:
+    Type: String
+  InstanceType:
+    Type: String
+  AppTcpPort:
+    Type: String
+    Default: "1433"
+
+Mappings:
+  RegionMap:
+    us-east-1:
+      "AMI": "ami-00a20f508263efd30"
+      "VPC": "vpc-244ee25e"
+      "SecurityGroup": "sg-0c16344a4bfb84a3b"
+      "KeyName": "test-aws3-virginia"
+      "Instance1AvailabilityZone": "us-east-1a"
+      "Instance2AvailabilityZone": "us-east-1b"
+      "Instance1Subnet": "subnet-d022bf8c"
+      "Instance2Subnet": "subnet-c622b2a1"
+      "DirectoryName": "kagarlickij.com"
+      "DomainUser": "Admin"
+      "SecretManagerSecret": "DomainPassword"
+    us-east-2:
+      "AMI": "ami-04be6a27b0206807f"
+      "VPC": "vpc-a14228c8"
+      "SecurityGroup": "sg-4f444526"
+      "KeyName": "test-aws3-ohio"
+      "Instance1AvailabilityZone": "us-east-2a"
+      "Instance2AvailabilityZone": "us-east-2b"
+      "Instance1Subnet": "subnet-c35b23aa"
+      "Instance2Subnet": "subnet-6fd95f14"
+      "DirectoryName": "kagarlickij.com"
+      "DomainUser": "Admin"
+      "SecretManagerSecret": "DomainPassword"
+
+Resources:
+  ADLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Join [ "-", [ "ADLambdaRole", !Ref Environment] ]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service:
+            - "lambda.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - "arn:aws:iam::aws:policy/AmazonSSMFullAccess"
+        - "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+
+  ADRemoveLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: !Join [ "-", [ "ADRemoveLambda", !Ref Environment] ]
+      Role: !GetAtt ADLambdaRole.Arn
+      Runtime: "python3.7"
+      Handler: "index.handler"
+      Timeout: 60
+      Environment:
+        Variables:
+          DomainUser: !FindInMap [RegionMap, !Ref "AWS::Region", DomainUser]
+          DomainUserPw: !FindInMap [RegionMap, !Ref "AWS::Region", SecretManagerSecret]
+          DirectoryName: !FindInMap [RegionMap, !Ref "AWS::Region", DirectoryName]
+      Code:
+        ZipFile: |
+          import os
+          import boto3
+          import json
+          import logging
+          import time
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          ssm_client = boto3.client('ssm')
+          def handler(event, context):
+              logger.info('got event{}'.format(event))
+              secret_name = os.environ['DomainUserPw']
+              region_name = "us-east-2"
+              session = boto3.session.Session()
+              client = session.client(
+                  service_name='secretsmanager',
+                  region_name=region_name
+              )
+              get_secret_value_response = client.get_secret_value(
+                  SecretId=secret_name
+              )
+              secret = get_secret_value_response['SecretString']
+              secret_dict = json.loads(secret)
+              secret_DomainPassword = secret_dict[secret_name]
+              InstanceId = event['detail']['EC2InstanceId']
+              command = ssm_client.send_command( InstanceIds=[InstanceId], DocumentName='AWS-RunPowerShellScript', Parameters={ "commands":[" \
+              $DomainPassword = ConvertTo-SecureString {DomainPassword} -AsPlainText -Force; \
+              $Creds = New-Object System.Management.Automation.PSCredential -ArgumentList {DirectoryName}\\{DomainUser},$DomainPassword; \
+              Remove-Computer -ComputerName $(hostname) -Credential $Creds -Verbose -Force; \
+              if ($? -ne 'True') {{exit 1}} else {{Restart-Computer -Force}} \
+              ".format(DomainPassword = secret_DomainPassword, DomainUser = os.environ['DomainUser'], DirectoryName = os.environ['DirectoryName'] ) ]} )
+              command_id = command['Command']['CommandId']
+              time.sleep(30)
+              command_output = ssm_client.get_command_invocation(
+                CommandId=command_id,
+                InstanceId=InstanceId,
+              )
+              logging.info(command_output)
+
+  InstanceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Join [ "-", [ "InstanceRole", !Ref Environment] ]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service:
+            - "ec2.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+        - "arn:aws:iam::aws:policy/AmazonSSMFullAccess"
+        - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        - "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+        - "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
+
+  InstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Path: "/"
+      Roles:
+      - !Ref InstanceRole
+
+  Instance1:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Ref NestedTemplateUrl
+      Parameters:
+        Environment: !Ref Environment
+        InstanceName: "Instance1"
+        SecurityGroup: !FindInMap [RegionMap, !Ref "AWS::Region", SecurityGroup]
+        Subnet: !FindInMap [RegionMap, !Ref "AWS::Region", Instance1Subnet]
+        AvailabilityZone: !FindInMap [RegionMap, !Ref "AWS::Region", Instance1AvailabilityZone]
+        KeyName: !FindInMap [RegionMap, !Ref "AWS::Region", KeyName]
+        AMI: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+        InstanceType: !Ref InstanceType
+        InstanceProfile: !Ref InstanceProfile
+        DirectoryName: !FindInMap [RegionMap, !Ref "AWS::Region", DirectoryName]
+        DomainUser: !FindInMap [RegionMap, !Ref "AWS::Region", DomainUser]
+        SecretManagerSecret: !FindInMap [RegionMap, !Ref "AWS::Region", SecretManagerSecret]
+        ADRemoveLambdaArn: !GetAtt ADRemoveLambda.Arn
+        ADRemoveLambdaId: "ADRemoveLambdaV1"
+        ADRemoveLambdaName: !Ref ADRemoveLambda
+        BucketName: !Ref BucketName
+
+  Instance2:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Ref NestedTemplateUrl
+      Parameters:
+        Environment: !Ref Environment
+        InstanceName: "Instance2"
+        SecurityGroup: !FindInMap [RegionMap, !Ref "AWS::Region", SecurityGroup]
+        Subnet: !FindInMap [RegionMap, !Ref "AWS::Region", Instance2Subnet]
+        AvailabilityZone: !FindInMap [RegionMap, !Ref "AWS::Region", Instance2AvailabilityZone]
+        KeyName: !FindInMap [RegionMap, !Ref "AWS::Region", KeyName]
+        AMI: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+        InstanceType: !Ref InstanceType
+        InstanceProfile: !Ref InstanceProfile
+        DirectoryName: !FindInMap [RegionMap, !Ref "AWS::Region", DirectoryName]
+        DomainUser: !FindInMap [RegionMap, !Ref "AWS::Region", DomainUser]
+        SecretManagerSecret: !FindInMap [RegionMap, !Ref "AWS::Region", SecretManagerSecret]
+        ADRemoveLambdaArn: !GetAtt ADRemoveLambda.Arn
+        ADRemoveLambdaId: "ADRemoveLambdaV1"
+        ADRemoveLambdaName: !Ref ADRemoveLambda
+        BucketName: !Ref BucketName
+
+  NLBTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPort: "traffic-port"
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      Name: !Join [ "-", [ "NLBTargetGroup", !Ref Environment] ]
+      Port: !Ref AppTcpPort
+      Protocol: "TCP"
+      UnhealthyThresholdCount: 2
+      VpcId: !FindInMap [RegionMap, !Ref "AWS::Region", VPC]
+      TargetType: "ip"
+      Targets:
+        - Id:
+            Fn::GetAtt: [Instance1, Outputs.SecondaryPrivateIpAddresses]
+          Port: !Ref AppTcpPort
+        - Id:
+            Fn::GetAtt: [Instance2, Outputs.SecondaryPrivateIpAddresses]
+          Port: !Ref AppTcpPort
+
+  NLB:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Name: !Join [ "-", [ "NLB", !Ref Environment] ]
+      Scheme: "internet-facing"
+      Subnets:
+        - !FindInMap [RegionMap, !Ref "AWS::Region", Instance1Subnet]
+        - !FindInMap [RegionMap, !Ref "AWS::Region", Instance2Subnet]
+      Type: "network"
+
+  NLBListener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !Ref NLBTargetGroup
+      LoadBalancerArn: !Ref NLB
+      Port: !Ref AppTcpPort
+      Protocol: "TCP"
+
+Outputs:
+  Instance1NetworkInterfaceSecondaryPrivateIpAddresses:
+    Value:
+      Fn::GetAtt: [Instance1, Outputs.SecondaryPrivateIpAddresses]
+  Instance2NetworkInterfaceSecondaryPrivateIpAddresses:
+    Value:
+      Fn::GetAtt: [Instance2, Outputs.SecondaryPrivateIpAddresses]

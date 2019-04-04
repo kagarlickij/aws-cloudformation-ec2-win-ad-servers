@@ -1,0 +1,6 @@
+templates:
+- ./*.yaml
+ignore_templates:
+- master_root.yaml
+include_checks:
+- I
