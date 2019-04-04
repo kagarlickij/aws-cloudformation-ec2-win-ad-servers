@@ -1,10 +1,10 @@
 #!/bin/bash
 
 ### This works for local execution, not CircleCI
-REPO_NAME=$(basename `git rev-parse --show-toplevel`)
-BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
-STACK_NAME=${REPO_NAME}-${BRANCH_NAME}
-echo -e "STACK_NAME=" $STACK_NAME
+# REPO_NAME=$(basename `git rev-parse --show-toplevel`)
+# BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+# STACK_NAME=${REPO_NAME}-${BRANCH_NAME}
+# echo -e "STACK_NAME=" $STACK_NAME
 
 # if [ "$BRANCH_NAME" != "master" ]; then {
 #     echo -e "Deploy works for MASTER branch only, current branch $BRANCH_NAME is not supported"
@@ -13,7 +13,7 @@ echo -e "STACK_NAME=" $STACK_NAME
 # fi
 
 ### This works for CircleCI, not local execution
-# STACK_NAME=${CIRCLE_PROJECT_REPONAME}-${CIRCLE_BRANCH}
+STACK_NAME=${CIRCLE_PROJECT_REPONAME}-${CIRCLE_BRANCH}
 echo -e "STACK_NAME=" $STACK_NAME
 
 echo -e "Deploy to production env, setting appropriate variables.."
