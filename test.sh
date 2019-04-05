@@ -92,6 +92,7 @@ function createProdCopy {
         --capabilities CAPABILITY_NAMED_IAM \
         --stack-name $STACK_NAME \
         --template-body file://master_root.yaml \
+        --disable-rollback \
         --parameters \
         ParameterKey=NestedTemplateUrl,ParameterValue=https://s3.amazonaws.com/$AWS_S3_BUCKET/PROD/nested.yaml \
         ParameterKey=InstanceType,ParameterValue=$AWS_EC2_INSTANCE_TYPE_TEST \
@@ -145,6 +146,7 @@ function updateProdCopy {
         --capabilities CAPABILITY_NAMED_IAM \
         --stack-name $STACK_NAME \
         --template-body file://root.yaml \
+        --disable-rollback \
         --parameters \
         ParameterKey=NestedTemplateUrl,ParameterValue=https://s3.amazonaws.com/$AWS_S3_BUCKET/$ENVIRONMENT/nested.yaml \
         ParameterKey=InstanceType,ParameterValue=$AWS_EC2_INSTANCE_TYPE_TEST \
