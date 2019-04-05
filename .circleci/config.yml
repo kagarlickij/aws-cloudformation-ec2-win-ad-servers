@@ -1,0 +1,67 @@
+version: 2.1
+
+executors:
+  circleci-aws-build-agent:
+    docker:
+      - image: kagarlickij/circleci-aws-build-agent:latest
+    working_directory: ~/project
+
+jobs:
+  checkout:
+    executor: circleci-aws-build-agent
+    steps:
+      - checkout
+      - persist_to_workspace:
+          root: ~/
+          paths:
+            - project
+
+  set_aws_config:
+    executor: circleci-aws-build-agent
+    steps:
+      - attach_workspace:
+          at: ~/
+      - run:
+          name: Set AWS credentials
+          command: bash aws-configure.sh
+
+  test:
+    executor: circleci-aws-build-agent
+    steps:
+      - attach_workspace:
+          at: ~/
+      - run:
+          name: Running test script
+          command: bash test.sh
+          no_output_timeout: 30m
+
+  deploy:
+    executor: circleci-aws-build-agent
+    steps:
+      - attach_workspace:
+          at: ~/
+      - run:
+          name: Running deploy script
+          command: bash deploy.sh
+          no_output_timeout: 30m
+
+workflows:
+  version: 2
+  pipeline:
+    jobs:
+      - checkout
+      - set_aws_config:
+          requires:
+            - checkout
+      - deploy:
+          requires:
+            - set_aws_config
+          filters:
+            branches: # master branch only
+              only: master
+      - test:
+          requires:
+            - set_aws_config
+          filters:
+            branches: # all branches except master
+              only: /^((?!master).)*$/

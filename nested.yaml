@@ -1,0 +1,287 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Metadata:
+  Author: Dmitriy Kagarlickij
+
+  cfn-lint:
+    config:
+      ignore_checks:
+        - W2001 # Parameter is used in Sub
+
+Parameters:
+  Environment:
+    Type: String
+  BucketName:
+    Type: String
+  InstanceType:
+    Type: String
+  InstanceName:
+    Type: String
+  InstanceProfile:
+    Type: String
+  KeyName:
+    Type: "AWS::EC2::KeyPair::KeyName"
+  AMI:
+    Type: "AWS::EC2::Image::Id"
+  SecurityGroup:
+    Type: "AWS::EC2::SecurityGroup::Id"
+  Subnet:
+    Type: "AWS::EC2::Subnet::Id"
+  AvailabilityZone:
+    Type: "AWS::EC2::AvailabilityZone::Name"
+  DirectoryName:
+    Type: String
+  DomainUser:
+    Type: String
+  SecretManagerSecret:
+    Type: String
+  ADRemoveLambdaArn:
+    Type: String
+  ADRemoveLambdaId:
+    Type: String
+  ADRemoveLambdaName:
+    Type: String
+
+Resources:
+  NetworkInterface:
+    Type: "AWS::EC2::NetworkInterface"
+    Properties:
+      GroupSet:
+        - !Ref SecurityGroup
+      SubnetId: !Ref Subnet
+      SecondaryPrivateIpAddressCount: 2
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Ref InstanceName, "NetworkInterface"] ]
+
+  Volume1:
+    Type: "AWS::EC2::Volume"
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone
+      VolumeType: "gp2"
+      Size: 10
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Ref InstanceName, "Volume1"] ]
+
+  Volume2:
+    Type: "AWS::EC2::Volume"
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone
+      VolumeType: "gp2"
+      Size: 20
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Ref InstanceName, "Volume2"] ]
+
+  CfnLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      LogGroupName: !Join [ "-", [ !Ref InstanceName, "CfnLogGroup"] ]
+      RetentionInDays: 7
+
+  LaunchTemplate:
+    Type: "AWS::EC2::LaunchTemplate"
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          config:
+          - 00-ConfigureCWLogs
+          - 01-CopyData
+          - 02-JoinAd
+          - 03-RenameComputer
+          - 04-AttachVolumes
+          - 05-Finalize
+        00-ConfigureCWLogs:
+          files:
+            C:\Program Files\Amazon\SSM\Plugins\awsCloudWatch\AWS.EC2.Windows.CloudWatch.json:
+              content: !Sub |
+                {
+                  "EngineConfiguration": {
+                      "Components": [
+                          {
+                              "FullName": "AWS.EC2.Windows.CloudWatch.CustomLog.CustomLogInputComponent,AWS.EC2.Windows.CloudWatch",
+                              "Id": "CfnInitLog",
+                              "Parameters": {
+                                  "CultureName": "en-US",
+                                  "Encoding": "ASCII",
+                                  "Filter": "cfn-init.log",
+                                  "LogDirectoryPath": "C:\\cfn\\log",
+                                  "TimeZoneKind": "Local",
+                                  "TimestampFormat": "yyyy-MM-dd HH:mm:ss,fff"
+                              }
+                          },
+                          {
+                              "FullName": "AWS.EC2.Windows.CloudWatch.CustomLog.CustomLogInputComponent,AWS.EC2.Windows.CloudWatch",
+                              "Id": "UserDataLog",
+                              "Parameters": {
+                                  "CultureName": "en-US",
+                                  "Encoding": "ASCII",
+                                  "Filter": "UserdataExecution.log",
+                                  "LogDirectoryPath": "C:\\ProgramData\\Amazon\\EC2-Windows\\Launch\\Log",
+                                  "TimeZoneKind": "Local",
+                                  "TimestampFormat": "yyyy/MM/dd HH:mm:ss'Z':"
+                              }
+                          },
+                          {
+                              "FullName": "AWS.EC2.Windows.CloudWatch.CloudWatchLogsOutput,AWS.EC2.Windows.CloudWatch",
+                              "Id": "CloudWatchCfnInitLog",
+                              "Parameters": {
+                                  "AccessKey": "",
+                                  "LogGroup": "${CfnLogGroup}",
+                                  "LogStream": "{instance_id}/CfnInitLog",
+                                  "Region": "${AWS::Region}",
+                                  "SecretKey": ""
+                              }
+                          },
+                          {
+                              "FullName": "AWS.EC2.Windows.CloudWatch.CloudWatchLogsOutput,AWS.EC2.Windows.CloudWatch",
+                              "Id": "CloudWatchUserDataLog",
+                              "Parameters": {
+                                  "AccessKey": "",
+                                  "LogGroup": "${CfnLogGroup}",
+                                  "LogStream": "{instance_id}/UserDataLog",
+                                  "Region": "${AWS::Region}",
+                                  "SecretKey": ""
+                              }
+                          },
+                          {
+                              "FullName": "AWS.EC2.Windows.CloudWatch.CloudWatch.CloudWatchOutputComponent,AWS.EC2.Windows.CloudWatch",
+                              "Id": "CloudWatch",
+                              "Parameters": {
+                                  "AccessKey": "",
+                                  "NameSpace": "Windows/Default",
+                                  "Region": "${AWS::Region}",
+                                  "SecretKey": ""
+                              }
+                          }
+                      ],
+                      "Flows": {
+                          "Flows": [
+                              "CfnInitLog,CloudWatchCfnInitLog",
+                              "UserDataLog,CloudWatchUserDataLog"
+                          ]
+                      },
+                      "PollInterval": "00:00:05"
+                  },
+                  "IsEnabled": true
+                }
+          commands:
+            0-enableSSM:
+              command: 'powershell.exe -Command "Set-Service -Name AmazonSSMAgent -StartupType Automatic"'
+              waitAfterCompletion: '0'
+            1-restartSSM:
+              command: 'powershell.exe -Command "Restart-Service AmazonSSMAgent"'
+              waitAfterCompletion: '30'
+        01-CopyData:
+          commands:
+            00_copydata:
+              command: !Sub |
+                powershell.exe -command Copy-S3Object -BucketName ${BucketName} -KeyPrefix ${Environment}\scripts -LocalFolder C:\bootstrap -Force
+              waitAfterCompletion: '0'
+        02-JoinAd:
+          commands:
+            00_joinad:
+              command: powershell.exe c:\bootstrap\join-ad.ps1
+              waitAfterCompletion: 'forever'
+        03-RenameComputer:
+          commands:
+            00_renamecomputer:
+              command: powershell.exe c:\bootstrap\rename-computer.ps1
+              waitAfterCompletion: '180'
+        04-AttachVolumes:
+          commands:
+            00_attchvolumes:
+              command: powershell.exe c:\bootstrap\attach-volumes.ps1
+              waitAfterCompletion: '0'
+        05-Finalize:
+          commands:
+            00_signal_success:
+              command: !Sub 'cfn-signal.exe --success true --resource ASG --stack ${AWS::StackName} --region ${AWS::Region}'
+              waitAfterCompletion: '0'
+    Properties:
+      LaunchTemplateName: !Join [ "-", [ !Ref InstanceName, "LaunchTemplate"] ]
+      LaunchTemplateData:
+        TagSpecifications:
+          - ResourceType: "instance"
+            Tags:
+              - Key: Name
+                Value: !Ref InstanceName
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: !Join [ "-", [ !Ref InstanceName, "Volume0"] ]
+        DisableApiTermination: false
+        KeyName: !Ref KeyName
+        ImageId: !Ref AMI
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Name: !Ref InstanceProfile
+        NetworkInterfaces:
+        - NetworkInterfaceId: !Ref NetworkInterface
+          DeviceIndex: 0
+        UserData:
+          Fn::Base64:
+            !Sub |
+              <powershell>
+              ($app = Get-WmiObject -Class Win32_Product -Filter "description='Amazon SSM Agent' ").Uninstall()
+              ($app = Get-WmiObject -Class Win32_Product -Filter "description='aws-cfn-bootstrap' ").Uninstall()
+              Start-Process msiexec.exe -Wait -ArgumentList '/passive /qn /i https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-win64-latest.msi'
+              Invoke-WebRequest -Uri 'https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/windows_amd64/AmazonSSMAgentSetup.exe' -OutFile 'C:\\AmazonSSMAgentSetup.exe'
+              Start-Process 'C:\\AmazonSSMAgentSetup.exe' -ArgumentList '/install /quiet' -Wait
+              Remove-Item -Path 'C:\\AmazonSSMAgentSetup.exe'
+              New-Item -ItemType Directory -Path 'C:\bootstrap'
+              '{"DirectoryName":"${DirectoryName}","DomainUser":"${DomainUser}", "SecretManagerSecret":"${SecretManagerSecret}", "Volume1":"${Volume1}", "Volume2":"${Volume2}"}' | Out-File -FilePath 'C:\bootstrap\paramstore.json'
+              cfn-init.exe --verbose --configsets=config --stack=${AWS::StackName} --resource LaunchTemplate --region ${AWS::Region}
+              </powershell>
+
+  ASG:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      AutoScalingGroupName: !Join [ "-", [ !Ref InstanceName, "ASG"] ]
+      DesiredCapacity: "1"
+      MaxSize: "1"
+      MinSize: "1"
+      HealthCheckType: "EC2"
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      AvailabilityZones:
+        - !Ref AvailabilityZone
+      LifecycleHookSpecificationList:
+        - DefaultResult: ABANDON
+          HeartbeatTimeout: 300
+          LifecycleHookName: PreTerminationHook
+          LifecycleTransition: "autoscaling:EC2_INSTANCE_TERMINATING"
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+
+  PreTerminationAction:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: !Join [ "-", [ !Ref InstanceName, "ASG"] ]
+      State: "ENABLED"
+      EventPattern:
+        source:
+          - "aws.autoscaling"
+        detail-type:
+          - "EC2 Instance-terminate Lifecycle Action"
+        detail:
+          AutoScalingGroupName:
+            - !Ref ASG
+      Targets:
+        - Arn: !Ref ADRemoveLambdaArn
+          Id: !Ref ADRemoveLambdaId
+
+  PreTerminationActionPermissionForEventsToInvokeLambda:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !Ref ADRemoveLambdaName
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt PreTerminationAction.Arn
+
+Outputs:
+  SecondaryPrivateIpAddresses:
+    Value: !Select [1, !GetAtt NetworkInterface.SecondaryPrivateIpAddresses]
