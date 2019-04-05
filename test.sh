@@ -123,23 +123,6 @@ function createProdCopy {
 }
 
 function updateProdCopy {
-    aws s3 rm s3://$AWS_S3_BUCKET/$ENVIRONMENT/nested.yaml
-    checkCommandExitCode "aws s3 rm"
-    aws s3 rm s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/attach-volumes.ps1
-    checkCommandExitCode "aws s3 rm"
-    aws s3 rm s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/join-ad.ps1
-    checkCommandExitCode "aws s3 rm"
-    aws s3 rm s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/rename-computer.ps1
-    checkCommandExitCode "aws s3 rm"
-    aws s3 cp nested.yaml s3://$AWS_S3_BUCKET/$ENVIRONMENT/nested.yaml
-    checkCommandExitCode "aws s3 cp"
-    aws s3 cp bootstrap-scripts/attach-volumes.ps1 s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/attach-volumes.ps1
-    checkCommandExitCode "aws s3 cp"
-    aws s3 cp bootstrap-scripts/join-ad.ps1 s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/join-ad.ps1
-    checkCommandExitCode "aws s3 cp"
-    aws s3 cp bootstrap-scripts/rename-computer.ps1 s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/rename-computer.ps1
-    checkCommandExitCode "aws s3 cp"
-
     echo -e "Starting CloudFormation stack update.."
     aws cloudformation update-stack \
         --region $AWS_REGION_TEST \
@@ -175,5 +158,23 @@ function updateProdCopy {
 }
 
 runTests
+
+aws s3 rm s3://$AWS_S3_BUCKET/$ENVIRONMENT/nested.yaml
+checkCommandExitCode "aws s3 rm"
+aws s3 rm s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/attach-volumes.ps1
+checkCommandExitCode "aws s3 rm"
+aws s3 rm s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/join-ad.ps1
+checkCommandExitCode "aws s3 rm"
+aws s3 rm s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/rename-computer.ps1
+checkCommandExitCode "aws s3 rm"
+aws s3 cp nested.yaml s3://$AWS_S3_BUCKET/$ENVIRONMENT/nested.yaml
+checkCommandExitCode "aws s3 cp"
+aws s3 cp bootstrap-scripts/attach-volumes.ps1 s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/attach-volumes.ps1
+checkCommandExitCode "aws s3 cp"
+aws s3 cp bootstrap-scripts/join-ad.ps1 s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/join-ad.ps1
+checkCommandExitCode "aws s3 cp"
+aws s3 cp bootstrap-scripts/rename-computer.ps1 s3://$AWS_S3_BUCKET/$ENVIRONMENT/scripts/rename-computer.ps1
+checkCommandExitCode "aws s3 cp"
+
 createProdCopy
 updateProdCopy
