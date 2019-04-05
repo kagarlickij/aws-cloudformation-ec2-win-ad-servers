@@ -20,7 +20,7 @@ echo -e "STACK_NAME=" $STACK_NAME
 
 echo -e "Working with test env, setting appropriate variables.."
 ENVIRONMENT="TEST"
-AWS_REGION_TEST="us-east-1"
+AWS_REGION_TEST="us-east-2"
 AWS_S3_BUCKET="aws-cloudformation-ec2-mssql"
 AWS_EC2_INSTANCE_TYPE_TEST="t2.large"
 echo -e "AWS_REGION_TEST="$AWS_REGION_TEST
